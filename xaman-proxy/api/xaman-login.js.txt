@@ -1,0 +1,38 @@
+// api/xaman-login.js
+const axios = require('axios');
+
+module.exports = async (req, res) => {
+    // Enable CORS headers so your WebGL build can access this endpoint
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Handle preflight OPTIONS request
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method Not Allowed' });
+    }
+
+    try {
+        // Forward the request to the official Xaman API payload endpoint
+        const response = await axios.post('https://xumm.app/api/v1/platform/payload', req.body, {
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': process.env.XAMAN_API_KEY,      // Stored safely in Vercel Env Variables
+                'X-API-Secret': process.env.XAMAN_API_SECRET // Stored safely in Vercel Env Variables
+            }
+        });
+
+        // Return the payload data (including the logic URL/QR data) back to Unity
+        return res.status(200).json(response.data);
+    } catch (error) {
+        console.error("Xaman API Error:", error.response ? error.response.data : error.message);
+        return res.status(500).json({ 
+            error: 'Failed to generate login payload', 
+            details: error.response ? error.response.data : error.message 
+        });
+    }
+};
