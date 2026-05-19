@@ -1,124 +1,160 @@
-public static void checkNFTs(String uuid) {
+const https = require('https');
 
-    new Thread(() -> {
+const apiKey = '403506c7-97d3-4922-b45a-80a543decec1';
+const apiSecret = '5dfb5f42-5606-4fb3-b773-859a834c4d12';
 
-        try {
+export default async function handler(req, res) {
 
-            for (int i = 0; i < 20; i++) {
+    // CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-                System.out.println("Checking login... Attempt: " + (i + 1));
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
 
-                Request request = new Request.Builder()
-                        .url("https://xumm.app/api/v1/platform/payload/" + uuid)
-                        .get()
-                        .addHeader("X-API-Key", API_KEY)
-                        .addHeader("X-API-Secret", API_SECRET)
-                        .build();
+    // =========================================================
+    // CREATE XAMAN SIGN IN PAYLOAD
+    // =========================================================
+    if (req.method === 'POST') {
 
-                Response response = client.newCall(request).execute();
-
-                if (response.body() == null) {
-                    Thread.sleep(3000);
-                    continue;
-                }
-
-                String responseBody = response.body().string();
-
-                JSONObject payloadJson =
-                        new JSONObject(responseBody);
-
-                JSONObject meta =
-                        payloadJson.getJSONObject("meta");
-
-                boolean resolved =
-                        meta.getBoolean("resolved");
-
-                // User ne approve nahi kiya abhi
-                if (!resolved) {
-
-                    Thread.sleep(3000);
-                    continue;
-                }
-
-                JSONObject responseObj =
-                        payloadJson.getJSONObject("response");
-
-                String walletAddress =
-                        responseObj.getString("account");
-
-                System.out.println("Wallet: " + walletAddress);
-
-                // =====================================================
-                // XRPL NFT CHECK
-                // =====================================================
-
-                JSONObject xrplRequest = new JSONObject();
-
-                xrplRequest.put("command", "account_nfts");
-                xrplRequest.put("account", walletAddress);
-                xrplRequest.put("ledger_index", "validated");
-
-                RequestBody xrplBody = RequestBody.create(
-                        xrplRequest.toString(),
-                        MediaType.parse("application/json")
-                );
-
-                Request xrplReq = new Request.Builder()
-                        .url("https://xrplcluster.com/")
-                        .post(xrplBody)
-                        .addHeader("Content-Type", "application/json")
-                        .build();
-
-                Response xrplResponse =
-                        client.newCall(xrplReq).execute();
-
-                if (xrplResponse.body() == null) {
-                    return;
-                }
-
-                String xrplText =
-                        xrplResponse.body().string();
-
-                JSONObject xrplJson =
-                        new JSONObject(xrplText);
-
-                JSONObject result =
-                        xrplJson.getJSONObject("result");
-
-                JSONArray nfts =
-                        result.optJSONArray("account_nfts");
-
-                int nftCount =
-                        nfts != null ? nfts.length() : 0;
-
-                System.out.println("NFT Count: " + nftCount);
-
-                // =====================================================
-                // LOGIN SUCCESS
-                // =====================================================
-
-                if (nftCount >= 2) {
-
-                    System.out.println("LOGIN SUCCESS");
-                    System.out.println("Access Granted");
-
-                } else {
-
-                    System.out.println("LOGIN FAILED");
-                    System.out.println("Need at least 2 NFTs");
-                }
-
-                return;
+        const postData = JSON.stringify({
+            txjson: {
+                TransactionType: 'SignIn'
             }
+        });
 
-            System.out.println("Login timeout");
+        const options = {
+            hostname: 'xumm.app',
+            path: '/api/v1/platform/payload',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': apiKey,
+                'X-API-Secret': apiSecret,
+                'Content-Length': postData.length
+            }
+        };
 
-        } catch (Exception e) {
+        const xamanRes = await makeHttpsRequest(options, postData);
 
-            System.out.println(
-                    "CheckNFT Error: " + e.getMessage()
-            );
+        return res.status(200).json(xamanRes);
+    }
+
+    // =========================================================
+    // CHECK LOGIN + NFT COUNT
+    // =========================================================
+    if (req.method === 'GET') {
+
+        const { uuid } = req.query;
+
+        // Check Xaman payload status
+        const options = {
+            hostname: 'xumm.app',
+            path: `/api/v1/platform/payload/${uuid}`,
+            method: 'GET',
+            headers: {
+                'X-API-Key': apiKey,
+                'X-API-Secret': apiSecret
+            }
+        };
+
+        const payloadStatus = await makeHttpsRequest(options);
+
+        // User ne abhi tak sign nahi kiya
+        if (!payloadStatus.meta?.resolved) {
+            return res.status(200).json({
+                resolved: false,
+                hasNFTs: false,
+                debugCount: 0
+            });
         }
 
-    }).start();
+        // Wallet address
+        const userWalletAddress = payloadStatus.response.account;
+
+        // XRPL NFT request
+        const xrplPostData = JSON.stringify({
+            command: "account_nfts",
+            account: userWalletAddress,
+            ledger_index: "validated"
+        });
+
+        const xrplOptions = {
+            hostname: 'xrplcluster.com',
+            port: 443,
+            path: '/',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': xrplPostData.length
+            }
+        };
+
+        const xrplData = await makeHttpsRequest(xrplOptions, xrplPostData);
+
+        // NFT count
+        const nftCount =
+            xrplData?.result?.account_nfts
+                ? xrplData.result.account_nfts.length
+                : 0;
+
+        console.log("Wallet:", userWalletAddress);
+        console.log("NFT Count:", nftCount);
+
+        // =========================================================
+        // LOGIN CONDITION
+        // 3 ya us se zyada NFTs hon toh login allow
+        // =========================================================
+        return res.status(200).json({
+            resolved: true,
+            hasNFTs: nftCount >= 3,
+            debugCount: nftCount
+        });
+    }
+
+    // Invalid method
+    return res.status(405).json({
+        error: 'Method not allowed'
+    });
+}
+
+// =========================================================
+// HTTPS REQUEST HELPER
+// =========================================================
+function makeHttpsRequest(options, bodyData = null) {
+
+    return new Promise((resolve) => {
+
+        const req = https.request(options, (res) => {
+
+            let data = '';
+
+            res.on('data', (chunk) => {
+                data += chunk;
+            });
+
+            res.on('end', () => {
+
+                try {
+                    resolve(JSON.parse(data));
+                }
+                catch (e) {
+                    resolve({});
+                }
+
+            });
+        });
+
+        req.on('error', () => {
+            resolve({});
+        });
+
+        if (bodyData) {
+            req.write(bodyData);
+        }
+
+        req.end();
+    });
 }
