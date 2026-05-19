@@ -5,11 +5,14 @@ const apiSecret = '5dfb5f42-5606-4fb3-b773-859a834c4d12';
 
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    // ... (rest of the headers)
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') return res.status(200).end();
 
     if (req.method === 'GET') {
         const { uuid } = req.query;
-        // ... (payload status check)
+        // ... (payload verification logic) ...
 
         const userWalletAddress = payloadStatus.response.account;
 
@@ -20,16 +23,25 @@ export default async function handler(req, res) {
             ledger_index: "validated"
         });
 
+        const xrplOptions = {
+            hostname: 'xrplcluster.com',
+            port: 443,
+            path: '/',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': xrplPostData.length }
+        };
+
         const xrplData = await makeHttpsRequest(xrplOptions, xrplPostData);
         const nftList = (xrplData && xrplData.result && xrplData.result.account_nfts) ? xrplData.result.account_nfts : [];
         
-        // STRICT LOGIC: Sirf 3 ya us se zyada par true jayega
+        // STRICTURE CHECK: 3 se kam hone par hasNFTs false jayega
         const hasRequiredNFTs = nftList.length >= 3;
 
         return res.status(200).json({
             resolved: true,
-            hasNFTs: hasRequiredNFTs, // Yahan ab strict check hoga
-            debugCount: nftList.length
+            hasNFTs: hasRequiredNFTs,
+            debugCount: nftList.length // Unity console mein count dikhega
         });
     }
+    // ... (rest of the code)
 }
