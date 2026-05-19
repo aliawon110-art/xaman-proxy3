@@ -46,16 +46,13 @@ export default async function handler(req, res) {
     }
 
     // =========================================================
-    // CHECK LOGIN + NFT COUNT
+    // LOGIN CHECK (NO NFT RESTRICTION)
     // =========================================================
     if (req.method === 'GET') {
 
         const { uuid } = req.query;
 
-        // =====================================================
-        // CHECK XAMAN LOGIN STATUS
-        // =====================================================
-
+        // Check Xaman payload status
         const options = {
             hostname: 'xumm.app',
             path: `/api/v1/platform/payload/${uuid}`,
@@ -69,9 +66,8 @@ export default async function handler(req, res) {
         const payloadStatus =
             await makeHttpsRequest(options);
 
-        // User ne approve nahi kiya
+        // Agar user ne sign nahi kiya
         if (!payloadStatus.meta?.resolved) {
-
             return res.status(200).json({
                 resolved: false,
                 hasNFTs: false,
@@ -79,76 +75,32 @@ export default async function handler(req, res) {
             });
         }
 
-        // =====================================================
-        // GET USER WALLET ADDRESS
-        // =====================================================
-
+        // Wallet address (sirf info ke liye)
         const userWalletAddress =
             payloadStatus.response.account;
 
         console.log("Wallet:", userWalletAddress);
 
-        // =====================================================
-        // GET USER NFTs FROM XRPL
-        // =====================================================
-
-        const xrplPostData = JSON.stringify({
-            command: "account_nfts",
-            account: userWalletAddress,
-            ledger_index: "validated"
-        });
-
-        const xrplOptions = {
-            hostname: 'xrplcluster.com',
-            port: 443,
-            path: '/',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': xrplPostData.length
-            }
-        };
-
-        const xrplData =
-            await makeHttpsRequest(
-                xrplOptions,
-                xrplPostData
-            );
-
-        // =====================================================
-        // NFT COUNT
-        // =====================================================
-
-        const nftCount =
-            xrplData?.result?.account_nfts
-                ? xrplData.result.account_nfts.length
-                : 0;
-
-        console.log("NFT Count:", nftCount);
-
-        // =====================================================
-        // LOGIN CONDITION
-        // 2 YA US SE ZYADA NFTs = LOGIN SUCCESS
-        // =====================================================
+        // =========================================================
+        // FORCE LOGIN (NO NFT CHECK)
+        // =========================================================
 
         return res.status(200).json({
             resolved: true,
-            hasNFTs: nftCount >= 2,
-            debugCount: nftCount
+            hasNFTs: true,
+            debugCount: 0
         });
     }
 
-    // =========================================================
-    // INVALID METHOD
-    // =========================================================
+    // Invalid method
     return res.status(405).json({
         error: 'Method not allowed'
     });
 }
 
-// =============================================================
+// =========================================================
 // HTTPS REQUEST HELPER
-// =============================================================
+// =========================================================
 function makeHttpsRequest(options, bodyData = null) {
 
     return new Promise((resolve) => {
@@ -164,22 +116,14 @@ function makeHttpsRequest(options, bodyData = null) {
             res.on('end', () => {
 
                 try {
-
                     resolve(JSON.parse(data));
-
                 } catch (e) {
-
-                    console.log("JSON Parse Error:", e);
-
                     resolve({});
                 }
             });
         });
 
-        req.on('error', (err) => {
-
-            console.log("HTTPS Error:", err);
-
+        req.on('error', () => {
             resolve({});
         });
 
