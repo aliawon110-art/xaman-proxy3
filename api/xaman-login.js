@@ -1,160 +1,250 @@
-const https = require('https');
+```java id="8b1f1q"
+package com.example.xamanlogin;
 
-const apiKey = '403506c7-97d3-4922-b45a-80a543decec1';
-const apiSecret = '5dfb5f42-5606-4fb3-b773-859a834c4d12';
+import okhttp3.*;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
-export default async function handler(req, res) {
+import java.io.IOException;
 
-    // CORS
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+public class XamanNFTLogin {
 
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
+    // =====================================================
+    // XAMAN API KEYS
+    // =====================================================
+    private static final String API_KEY =
+            "403506c7-97d3-4922-b45a-80a543decec1";
 
-    // =========================================================
-    // CREATE XAMAN SIGN IN PAYLOAD
-    // =========================================================
-    if (req.method === 'POST') {
+    private static final String API_SECRET =
+            "5dfb5f42-5606-4fb3-b773-859a834c4d12";
 
-        const postData = JSON.stringify({
-            txjson: {
-                TransactionType: 'SignIn'
-            }
-        });
+    private static final OkHttpClient client =
+            new OkHttpClient();
 
-        const options = {
-            hostname: 'xumm.app',
-            path: '/api/v1/platform/payload',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': apiKey,
-                'X-API-Secret': apiSecret,
-                'Content-Length': postData.length
-            }
-        };
+    // =====================================================
+    // CREATE LOGIN PAYLOAD
+    // =====================================================
+    public static void createLoginPayload() {
 
-        const xamanRes = await makeHttpsRequest(options, postData);
+        try {
 
-        return res.status(200).json(xamanRes);
-    }
+            JSONObject txjson = new JSONObject();
+            txjson.put("TransactionType", "SignIn");
 
-    // =========================================================
-    // CHECK LOGIN + NFT COUNT
-    // =========================================================
-    if (req.method === 'GET') {
+            JSONObject body = new JSONObject();
+            body.put("txjson", txjson);
 
-        const { uuid } = req.query;
+            RequestBody requestBody = RequestBody.create(
+                    body.toString(),
+                    MediaType.parse("application/json")
+            );
 
-        // Check Xaman payload status
-        const options = {
-            hostname: 'xumm.app',
-            path: `/api/v1/platform/payload/${uuid}`,
-            method: 'GET',
-            headers: {
-                'X-API-Key': apiKey,
-                'X-API-Secret': apiSecret
-            }
-        };
+            Request request = new Request.Builder()
+                    .url("https://xumm.app/api/v1/platform/payload")
+                    .post(requestBody)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("X-API-Key", API_KEY)
+                    .addHeader("X-API-Secret", API_SECRET)
+                    .build();
 
-        const payloadStatus = await makeHttpsRequest(options);
+            client.newCall(request).enqueue(new Callback() {
 
-        // User ne abhi tak sign nahi kiya
-        if (!payloadStatus.meta?.resolved) {
-            return res.status(200).json({
-                resolved: false,
-                hasNFTs: false,
-                debugCount: 0
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    System.out.println("Login Payload Error: " + e.getMessage());
+                }
+
+                @Override
+                public void onResponse(Call call, Response response)
+                        throws IOException {
+
+                    if (response.body() == null) return;
+
+                    String responseBody = response.body().string();
+
+                    try {
+
+                        JSONObject json = new JSONObject(responseBody);
+
+                        String uuid = json.getString("uuid");
+
+                        JSONObject next = json.getJSONObject("next");
+
+                        String loginUrl = next.getString("always");
+
+                        System.out.println("UUID: " + uuid);
+                        System.out.println("Open Xaman Wallet:");
+                        System.out.println(loginUrl);
+
+                        // Ab NFT verification start karo
+                        checkNFTs(uuid);
+
+                    } catch (Exception ex) {
+                        System.out.println("Parse Error: " + ex.getMessage());
+                    }
+                }
             });
+
+        } catch (Exception e) {
+            System.out.println("Create Payload Error: " + e.getMessage());
         }
-
-        // Wallet address
-        const userWalletAddress = payloadStatus.response.account;
-
-        // XRPL NFT request
-        const xrplPostData = JSON.stringify({
-            command: "account_nfts",
-            account: userWalletAddress,
-            ledger_index: "validated"
-        });
-
-        const xrplOptions = {
-            hostname: 'xrplcluster.com',
-            port: 443,
-            path: '/',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': xrplPostData.length
-            }
-        };
-
-        const xrplData = await makeHttpsRequest(xrplOptions, xrplPostData);
-
-        // NFT count
-        const nftCount =
-            xrplData?.result?.account_nfts
-                ? xrplData.result.account_nfts.length
-                : 0;
-
-        console.log("Wallet:", userWalletAddress);
-        console.log("NFT Count:", nftCount);
-
-        // =========================================================
-        // LOGIN CONDITION
-        // 3 ya us se zyada NFTs hon toh login allow
-        // =========================================================
-        return res.status(200).json({
-            resolved: true,
-            hasNFTs: nftCount >= 3,
-            debugCount: nftCount
-        });
     }
 
-    // Invalid method
-    return res.status(405).json({
-        error: 'Method not allowed'
-    });
-}
+    // =====================================================
+    // CHECK USER NFT COUNT
+    // =====================================================
+    public static void checkNFTs(String uuid) {
 
-// =========================================================
-// HTTPS REQUEST HELPER
-// =========================================================
-function makeHttpsRequest(options, bodyData = null) {
+        Request request = new Request.Builder()
+                .url("https://xumm.app/api/v1/platform/payload/" + uuid)
+                .get()
+                .addHeader("X-API-Key", API_KEY)
+                .addHeader("X-API-Secret", API_SECRET)
+                .build();
 
-    return new Promise((resolve) => {
+        client.newCall(request).enqueue(new Callback() {
 
-        const req = https.request(options, (res) => {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                System.out.println("Verification Error: " + e.getMessage());
+            }
 
-            let data = '';
+            @Override
+            public void onResponse(Call call, Response response)
+                    throws IOException {
 
-            res.on('data', (chunk) => {
-                data += chunk;
-            });
+                if (response.body() == null) return;
 
-            res.on('end', () => {
+                String responseBody = response.body().string();
 
                 try {
-                    resolve(JSON.parse(data));
+
+                    JSONObject payloadJson =
+                            new JSONObject(responseBody);
+
+                    JSONObject meta =
+                            payloadJson.getJSONObject("meta");
+
+                    boolean resolved =
+                            meta.getBoolean("resolved");
+
+                    if (!resolved) {
+
+                        System.out.println("User ne abhi sign nahi kiya.");
+                        return;
+                    }
+
+                    JSONObject responseObj =
+                            payloadJson.getJSONObject("response");
+
+                    String walletAddress =
+                            responseObj.getString("account");
+
+                    System.out.println("Wallet: " + walletAddress);
+
+                    // =====================================================
+                    // XRPL NFT REQUEST
+                    // =====================================================
+                    JSONObject xrplRequest = new JSONObject();
+
+                    xrplRequest.put("command", "account_nfts");
+                    xrplRequest.put("account", walletAddress);
+                    xrplRequest.put("ledger_index", "validated");
+
+                    RequestBody xrplBody = RequestBody.create(
+                            xrplRequest.toString(),
+                            MediaType.parse("application/json")
+                    );
+
+                    Request xrplReq = new Request.Builder()
+                            .url("https://xrplcluster.com/")
+                            .post(xrplBody)
+                            .addHeader("Content-Type", "application/json")
+                            .build();
+
+                    client.newCall(xrplReq).enqueue(new Callback() {
+
+                        @Override
+                        public void onFailure(Call call, IOException e) {
+                            System.out.println("XRPL Error: " + e.getMessage());
+                        }
+
+                        @Override
+                        public void onResponse(Call call, Response response)
+                                throws IOException {
+
+                            if (response.body() == null) return;
+
+                            String xrplResponse =
+                                    response.body().string();
+
+                            try {
+
+                                JSONObject xrplJson =
+                                        new JSONObject(xrplResponse);
+
+                                JSONObject result =
+                                        xrplJson.getJSONObject("result");
+
+                                JSONArray nfts =
+                                        result.optJSONArray("account_nfts");
+
+                                int nftCount =
+                                        nfts != null ? nfts.length() : 0;
+
+                                System.out.println("NFT Count: " + nftCount);
+
+                                // =====================================================
+                                // LOGIN CONDITION
+                                // 2 YA US SE ZYADA NFTs = LOGIN SUCCESS
+                                // =====================================================
+                                if (nftCount >= 2) {
+
+                                    System.out.println("LOGIN SUCCESS");
+                                    System.out.println("Access Granted");
+
+                                } else {
+
+                                    System.out.println("LOGIN FAILED");
+                                    System.out.println(
+                                            "Need at least 2 NFTs"
+                                    );
+                                }
+
+                            } catch (Exception ex) {
+
+                                System.out.println(
+                                        "XRPL Parse Error: "
+                                                + ex.getMessage()
+                                );
+                            }
+                        }
+                    });
+
+                } catch (Exception ex) {
+
+                    System.out.println(
+                            "Payload Parse Error: "
+                                    + ex.getMessage()
+                    );
                 }
-                catch (e) {
-                    resolve({});
-                }
-
-            });
+            }
         });
+    }
 
-        req.on('error', () => {
-            resolve({});
-        });
+    // =====================================================
+    // MAIN
+    // =====================================================
+    public static void main(String[] args) {
 
-        if (bodyData) {
-            req.write(bodyData);
+        createLoginPayload();
+
+        // App ko band hone se bachane ke liye
+        try {
+            Thread.sleep(60000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
-
-        req.end();
-    });
+    }
 }
+```
