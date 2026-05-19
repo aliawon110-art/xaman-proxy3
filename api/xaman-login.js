@@ -5,7 +5,9 @@ const apiSecret = '5dfb5f42-5606-4fb3-b773-859a834c4d12';
 
 export default async function handler(req, res) {
 
+    // =========================================================
     // CORS
+    // =========================================================
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -15,7 +17,7 @@ export default async function handler(req, res) {
     }
 
     // =========================================================
-    // CREATE XAMAN SIGN IN PAYLOAD
+    // CREATE XAMAN LOGIN PAYLOAD
     // =========================================================
     if (req.method === 'POST') {
 
@@ -37,7 +39,8 @@ export default async function handler(req, res) {
             }
         };
 
-        const xamanRes = await makeHttpsRequest(options, postData);
+        const xamanRes =
+            await makeHttpsRequest(options, postData);
 
         return res.status(200).json(xamanRes);
     }
@@ -49,7 +52,10 @@ export default async function handler(req, res) {
 
         const { uuid } = req.query;
 
-        // Check Xaman payload status
+        // =====================================================
+        // CHECK XAMAN LOGIN STATUS
+        // =====================================================
+
         const options = {
             hostname: 'xumm.app',
             path: `/api/v1/platform/payload/${uuid}`,
@@ -60,10 +66,12 @@ export default async function handler(req, res) {
             }
         };
 
-        const payloadStatus = await makeHttpsRequest(options);
+        const payloadStatus =
+            await makeHttpsRequest(options);
 
-        // User ne abhi tak sign nahi kiya
+        // User ne approve nahi kiya
         if (!payloadStatus.meta?.resolved) {
+
             return res.status(200).json({
                 resolved: false,
                 hasNFTs: false,
@@ -71,10 +79,19 @@ export default async function handler(req, res) {
             });
         }
 
-        // Wallet address
-        const userWalletAddress = payloadStatus.response.account;
+        // =====================================================
+        // GET USER WALLET ADDRESS
+        // =====================================================
 
-        // XRPL NFT request
+        const userWalletAddress =
+            payloadStatus.response.account;
+
+        console.log("Wallet:", userWalletAddress);
+
+        // =====================================================
+        // GET USER NFTs FROM XRPL
+        // =====================================================
+
         const xrplPostData = JSON.stringify({
             command: "account_nfts",
             account: userWalletAddress,
@@ -92,37 +109,46 @@ export default async function handler(req, res) {
             }
         };
 
-        const xrplData = await makeHttpsRequest(xrplOptions, xrplPostData);
+        const xrplData =
+            await makeHttpsRequest(
+                xrplOptions,
+                xrplPostData
+            );
 
-        // NFT count
+        // =====================================================
+        // NFT COUNT
+        // =====================================================
+
         const nftCount =
             xrplData?.result?.account_nfts
                 ? xrplData.result.account_nfts.length
                 : 0;
 
-        console.log("Wallet:", userWalletAddress);
         console.log("NFT Count:", nftCount);
 
-        // =========================================================
+        // =====================================================
         // LOGIN CONDITION
-        // 3 ya us se zyada NFTs hon toh login allow
-        // =========================================================
+        // 2 YA US SE ZYADA NFTs = LOGIN SUCCESS
+        // =====================================================
+
         return res.status(200).json({
             resolved: true,
-            hasNFTs: nftCount >= 3,
+            hasNFTs: nftCount >= 2,
             debugCount: nftCount
         });
     }
 
-    // Invalid method
+    // =========================================================
+    // INVALID METHOD
+    // =========================================================
     return res.status(405).json({
         error: 'Method not allowed'
     });
 }
 
-// =========================================================
+// =============================================================
 // HTTPS REQUEST HELPER
-// =========================================================
+// =============================================================
 function makeHttpsRequest(options, bodyData = null) {
 
     return new Promise((resolve) => {
@@ -138,16 +164,22 @@ function makeHttpsRequest(options, bodyData = null) {
             res.on('end', () => {
 
                 try {
+
                     resolve(JSON.parse(data));
-                }
-                catch (e) {
+
+                } catch (e) {
+
+                    console.log("JSON Parse Error:", e);
+
                     resolve({});
                 }
-
             });
         });
 
-        req.on('error', () => {
+        req.on('error', (err) => {
+
+            console.log("HTTPS Error:", err);
+
             resolve({});
         });
 
