@@ -1,11 +1,22 @@
 // api/xaman-login.js
 const { XummSdk } = require('xumm-sdk');
-// Apni asli Xaman API Credentials yahan daalein ya process.env se uthayein
-// GitHub par line number 4 ko is tarah se sahi karein:
-const Sdk = new XummSdk('a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d', 'z9y8x7w6-v5u4-t3s2-r1q0-p9o8n7m6l5k4');
+const https = require('https'); 
+
+// ⚡ Keys initialized safely
+const apiKey = '403506c7-97d3-4922-b45a-80a543decec1'; 
+const apiSecret = '5dfb5f42-5606-4fb3-b773-859a834c4d12';
+
+let Sdk;
+try {
+    if (apiKey && apiKey !== 'YOUR_XAMAN_API_KEY') {
+        Sdk = new XummSdk(apiKey, apiSecret);
+    }
+} catch (e) {
+    console.error("Xaman SDK Init Error:", e.message);
+}
 
 export default async function handler(req, res) {
-    // CORS Headers taake Unity WebGL/Editor block na ho
+    // CORS Headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -14,8 +25,14 @@ export default async function handler(req, res) {
         return res.status(200).end();
     }
 
+    if (!Sdk) {
+        return res.status(200).json({ 
+            error: "Backend Setup Pending: API Keys are not initialized properly." 
+        });
+    }
+
     // -------------------------------------------------------
-    // CASE 1: POST Request (Unity jab login request generate karegi)
+    // CASE 1: POST Request (Unity payload request)
     // -------------------------------------------------------
     if (req.method === 'POST') {
         try {
@@ -25,7 +42,6 @@ export default async function handler(req, res) {
                 }
             });
             
-            // Return uuid and redirect url to Unity
             return res.status(200).json({
                 uuid: payload.uuid,
                 next: {
@@ -33,12 +49,12 @@ export default async function handler(req, res) {
                 }
             });
         } catch (error) {
-            return res.status(500).json({ error: error.message });
+            return res.status(200).json({ error: "Xaman Payload Error: " + error.message });
         }
     }
 
     // -------------------------------------------------------
-    // CASE 2: GET Request (Unity jab status check karegi: ?uuid=xxxx)
+    // CASE 2: GET Request (Unity polling mechanism)
     // -------------------------------------------------------
     if (req.method === 'GET') {
         const { uuid } = req.query;
@@ -47,59 +63,72 @@ export default async function handler(req, res) {
         }
 
         try {
-            // 1. Xaman se payload ka status verify karo
             const payloadStatus = await Sdk.payload.get(uuid);
 
-            // Agar user ne abhi tak wallet me sign/reject nahi kiya (Pending state)
+            if (!payloadStatus || !payloadStatus.meta) {
+                return res.status(200).json({ resolved: false, hasNFTs: false });
+            }
+
             if (!payloadStatus.meta.resolved) {
-                return res.status(200).json({
-                    resolved: false,
-                    hasNFTs: false
-                });
+                return res.status(200).json({ resolved: false, hasNFTs: false });
             }
 
-            // Agar user ne request reject kar di ya expire ho gayi
             if (payloadStatus.meta.resolved && !payloadStatus.meta.signed) {
-                return res.status(200).json({
-                    resolved: true,
-                    hasNFTs: false // Sign hi nahi kiya toh reject mano
-                });
+                return res.status(200).json({ resolved: true, hasNFTs: false });
             }
 
-            // 2. Agar user ne successfully sign kar diya, toh uska wallet address uthao
             const userWalletAddress = payloadStatus.response.account;
 
-            // 3. XRPL Ledger par request bhej kar check karo bande ke paas kitne NFTs hain
-            // Hum yahan public XRPL cluster RPC ka use kar rahe hain
-            const xrplResponse = await fetch('https://xrplcluster.com', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    command: "account_nfts",
-                    account: userWalletAddress,
-                    ledger_index: "validated"
-                })
-            });
-
-            const xrplData = await xrplResponse.json();
-            const nftList = xrplData.result.account_nfts || [];
+            // Strict fallback check for standard NFTs
+            const xrplData = await callXrplLedger(userWalletAddress);
+            const nftList = (xrplData && xrplData.result && xrplData.result.account_nfts) ? xrplData.result.account_nfts : [];
             
-            // 🔴 MAIN CHECK: Kya bande ke paas 3 ya us se zyaada NFTs hain?
             const totalNFTs = nftList.length;
             const userHas3NFTs = totalNFTs >= 3;
 
-            console.log(`Address: ${userWalletAddress} has total NFTs: ${totalNFTs}`);
-
-            // Final response jo Unity read karegi
             return res.status(200).json({
                 resolved: true,
                 hasNFTs: userHas3NFTs
             });
 
         } catch (error) {
-            return res.status(500).json({ error: error.message });
+            return res.status(200).json({ error: "GET Verification Error: " + error.message });
         }
     }
 
     return res.status(405).json({ error: "Method not allowed" });
+}
+
+function callXrplLedger(accountAddress) {
+    return new Promise((resolve, reject) => {
+        const postData = JSON.stringify({
+            command: "account_nfts",
+            account: accountAddress,
+            ledger_index: "validated"
+        });
+
+        const options = {
+            hostname: 'xrplcluster.com',
+            port: 443, 
+            path: '/',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': postData.length
+            }
+        };
+
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+                try { resolve(JSON.parse(data)); } 
+                catch (e) { resolve({}); }
+            });
+        });
+
+        req.on('error', (e) => { resolve({}); });
+        req.write(postData);
+        req.end();
+    });
 }
