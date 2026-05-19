@@ -74,10 +74,12 @@ export default async function handler(req, res) {
             const xrplData = await makeHttpsRequest(xrplOptions, xrplPostData);
             const nftList = (xrplData && xrplData.result && xrplData.result.account_nfts) ? xrplData.result.account_nfts : [];
             
-            // 🌟 DEBUG UPDATE: Hum raw length aur pure response ko Unity tak bhej rahe hain diagnose karne ke liye
+            // 🔴 TESTING CHECK: Ab agar 1 ya us se zyaada NFT hoga toh hasNFTs = true ho jayega
+            const userHas1NFT = nftList.length >= 1;
+
             return res.status(200).json({
                 resolved: true,
-                hasNFTs: nftList.length >= 3,
+                hasNFTs: userHas1NFT,
                 debugCount: nftList.length,
                 wallet: userWalletAddress
             });
