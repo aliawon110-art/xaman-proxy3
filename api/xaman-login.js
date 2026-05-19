@@ -30,7 +30,11 @@ export default async function handler(req, res) {
         const nftCount = xrplData?.result?.account_nfts ? xrplData.result.account_nfts.length : 0;
 
         // Yahan 2 check ho raha hai
-        return res.status(200).json({ resolved: true, hasNFTs: nftCount >= 2, debugCount: nftCount });
+       return res.status(200).json({ 
+    resolved: true, 
+    hasNFTs: nftCount >= 3, 
+    debugCount: nftCount 
+});
     }
 }
 
