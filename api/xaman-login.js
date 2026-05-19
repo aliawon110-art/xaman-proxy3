@@ -1,5 +1,4 @@
 const https = require('https');
-
 const apiKey = '403506c7-97d3-4922-b45a-80a543decec1';
 const apiSecret = '5dfb5f42-5606-4fb3-b773-859a834c4d12';
 
@@ -30,6 +29,7 @@ export default async function handler(req, res) {
         const xrplData = await makeHttpsRequest(xrplOptions, xrplPostData);
         const nftCount = xrplData?.result?.account_nfts ? xrplData.result.account_nfts.length : 0;
 
+        // Yahan 2 check ho raha hai
         return res.status(200).json({ resolved: true, hasNFTs: nftCount >= 2, debugCount: nftCount });
     }
 }
