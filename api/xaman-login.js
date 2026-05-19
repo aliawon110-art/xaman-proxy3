@@ -104,12 +104,12 @@ export default async function handler(req, res) {
             const xrplData = await makeHttpsRequest(xrplOptions, xrplPostData);
             const nftList = (xrplData && xrplData.result && xrplData.result.account_nfts) ? xrplData.result.account_nfts : [];
             
-            // 🔥 DETECT CHECK: 1 NFT Condition laga di hai yahan!
-            const userHas1NFT = nftList.length >= 1;
+            // 🔴 UPDATED CHECK: Ab exact 2 NFTs ki condition set kar di hai!
+            const userHas2NFTs = nftList.length >= 2;
 
             return res.status(200).json({
                 resolved: true,
-                hasNFTs: userHas1NFT,
+                hasNFTs: userHas2NFTs,
                 debugCount: nftList.length
             });
 
@@ -121,7 +121,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
 }
 
-// Global Crash-Proof Core Request Engine
 function makeHttpsRequest(options, bodyData = null) {
     return new Promise((resolve) => {
         const req = https.request(options, (res) => {
