@@ -1,10 +1,16 @@
 const xrpl = require("xrpl");
 const { XummSdk } = require("xumm-sdk");
 
-const sdk = new XummSdk(
-    process.env.XAMAN_API_KEY,
-    process.env.XAMAN_API_SECRET
-);
+// Gracefully handle missing environment variables so it doesn't crash initialization
+const apiKey = process.env.XAMAN_API_KEY;
+const apiSecret = process.env.XAMAN_API_SECRET;
+
+let sdk = null;
+if (apiKey && apiSecret) {
+    sdk = new XummSdk(apiKey, apiSecret);
+} else {
+    console.error("CRITICAL CONFIG ERROR: XAMAN_API_KEY or XAMAN_API_SECRET is missing from environment variables.");
+}
 
 // ---------------- NFT CHECK ----------------
 async function checkNFTs(walletAddress) {
@@ -31,7 +37,11 @@ async function checkNFTs(walletAddress) {
         console.error("NFT ERROR:", err);
         return { debugCount: 0, hasEnoughNfts: false };
     } finally {
-        client.disconnect();
+        try {
+            await client.disconnect();
+        } catch (e) {
+            // Ignore disconnect errors
+        }
     }
 }
 
@@ -50,25 +60,32 @@ module.exports = async function handler(req, res) {
     res.setHeader("Cache-Control", "no-store");
 
     try {
+        // Fail early if SDK isn't configured properly
+        if (!sdk) {
+            throw new Error("Backend API keys are missing or unconfigured in Vercel.");
+        }
 
-        // ---------------- CREATE LOGIN ----------------
+        // ---------------- CREATE LOGIN (POST) ----------------
         if (req.method === "POST") {
-
             const payload = await sdk.payload.create({
                 txjson: {
                     TransactionType: "SignIn"
                 }
             });
 
+            if (!payload || !payload.uuid) {
+                throw new Error("Xaman SDK failed to generate a valid auth payload.");
+            }
+
             return res.status(200).json({
                 uuid: payload.uuid,
-                next: payload.next
+                next: payload.next,
+                error: null
             });
         }
 
-        // ---------------- CHECK LOGIN ----------------
+        // ---------------- CHECK LOGIN (GET) ----------------
         if (req.method === "GET") {
-
             const uuid = req.query.uuid;
 
             if (!uuid) {
@@ -80,39 +97,49 @@ module.exports = async function handler(req, res) {
 
             const result = await sdk.payload.get(uuid);
 
+            if (!result || !result.meta) {
+                throw new Error("Failed to retrieve payload details from Xaman.");
+            }
+
             // not finished
             if (!result.meta.resolved) {
-                return res.json({ resolved: false });
+                return res.status(200).json({ resolved: false, error: null });
             }
 
             // rejected
             if (!result.meta.signed) {
-                return res.json({
+                return res.status(200).json({
                     resolved: true,
                     hasEnoughNfts: false,
-                    debugCount: 0
+                    debugCount: 0,
+                    error: "User rejected the sign-in request."
                 });
             }
 
             const wallet = result.response.account;
-
             const nft = await checkNFTs(wallet);
 
-            return res.json({
+            return res.status(200).json({
                 resolved: true,
                 account: wallet,
                 debugCount: nft.debugCount,
-                hasEnoughNfts: nft.hasEnoughNfts
+                hasEnoughNfts: nft.hasEnoughNfts,
+                error: null
             });
         }
 
         return res.status(405).json({ error: "Method not allowed" });
 
     } catch (e) {
-        console.error(e);
-        return res.status(500).json({
+        console.error("SERVER EXCEPTION:", e.message);
+        
+        // Return a clean 200 JSON payload containing the error message 
+        // This stops WebGL from blowing up on raw network crashes
+        return res.status(200).json({
+            uuid: null,
+            next: null,
             resolved: false,
-            error: e.message
+            error: e.message || "An unknown backend error occurred."
         });
     }
 };
