@@ -1,125 +1,83 @@
 const { XummSdk } = require('xumm-sdk');
-const axios = require('axios'); // ADD THIS Stable HTTP module
 
-// Initialize Xaman SDK using your credentials
+// Initialize Xaman SDK using your credentials saved in Vercel
 const sdk = new XummSdk(process.env.XUMM_API_KEY, process.env.XUMM_API_SECRET);
 
 module.exports = async (req, res) => {
-    // Enable CORS handling for cross-origin browser execution loops
+    // 1. Enable CORS handling for cross-origin browser execution loops (Unity WebGL / Editors)
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
+    // Handle CORS pre-flight
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
 
-    // INTERCEPT ROUTE: If the callback action tells the browser to close the window
+    // 2. INTERCEPT ROUTE: Handle window closure from mobile redirects
     if (req.query.action === 'close') {
         res.setHeader('Content-Type', 'text/html');
         return res.status(200).send(`
             <!DOCTYPE html>
             <html>
-            <head>
-                <title>Success</title>
-                <style>
-                    body { background-color: #121212; color: #ffffff; font-family: sans-serif; text-align: center; padding-top: 100px; }
-                    .card { background: #1e1e1e; padding: 40px; display: inline-block; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-                    h1 { color: #00e676; margin-bottom: 10px; }
-                    p { color: #aaaaaa; font-size: 16px; }
-                </style>
-            </head>
-            <body>
-                <div class="card">
-                    <h1>✓ Signed Successfully!</h1>
-                    <p>Returning to your game screen automatically...</p>
-                </div>
-                <script>
-                    // Execute tab shutdown protocols
-                    setTimeout(function() {
-                        window.close();
-                        // Alternative path safety mechanism if native browser settings inhibit window close blocks
-                        setTimeout(function() {
-                            window.location.href = "about:blank";
-                        }, 200);
-                    }, 500);
-                </script>
+            <head><title>Success</title></head>
+            <body style="font-family:sans-serif; text-align:center; padding-top:50px;">
+                <h2>Authorization Approved!</h2>
+                <p>You can close this window and return to the game.</p>
+                <script>window.close();</script>
             </body>
             </html>
         `);
     }
 
-    // PROCESS TIMELINE 1: Handle incoming POST requests to establish fresh validation signatures
+    // 3. POST ROUTE: Unity is requesting a new Sign-In QR Code Payload
     if (req.method === 'POST') {
         try {
+            // Safely parse the incoming JSON payload from Unity
+            const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+            
+            // Generate the payload via Xaman SDK
             const payload = await sdk.payload.create({
-                txjson: {
-                    TransactionType: "SignIn"
-                },
-                options: {
-                    submit: false,
-                    // FORCE REDIRECT: Returns the user back to our secure tab closing listener route
-                    return_url: {
-                        web: "https://xaman-proxy3.vercel.app/api/xaman-login?action=close"
-                    }
-                }
-            }, true);
-
-            return res.status(200).json({
-                uuid: payload.uuid,
-                next: { always: payload.next.always },
-                refs: { qr_png: payload.refs.qr_png }
+                TransactionType: 'SignIn',
+                ...body?.txjson // Safely merge overrides if sent
             });
-        } catch (err) {
-            return res.status(500).json({ error: err.message });
+
+            // Return the full payload tracking object back to Unity
+            return res.status(200).json(payload);
+        } catch (error) {
+            console.error("Xaman Payload Creation Error:", error);
+            return res.status(500).json({ error: "Failed to create login payload", details: error.message });
         }
     }
 
-    // PROCESS TIMELINE 2: Handle incoming GET requests tracking user authorization state loops
+    // 4. GET ROUTE: Unity is polling to check if the payload has been resolved/signed
     if (req.method === 'GET') {
         const { uuid } = req.query;
+
         if (!uuid) {
-            return res.status(400).json({ error: "Missing required payload uuid parameter context." });
+            return res.status(400).json({ error: "Missing payload UUID parameter." });
         }
 
         try {
-            const status = await sdk.payload.get(uuid);
-            
-            let accountAddress = status.response?.account || null;
-            let totalNftsFound = 0;
+            // Fetch the current status of this specific QR payload from Xaman
+            const payloadStatus = await sdk.payload.get(uuid);
 
-            // Fetch live data directly when authorization state updates successfully
-            if (status.meta.resolved && accountAddress) {
-                try {
-                    // Pull verified ledger entries using stable axios instead of native fetch
-                    const xrplResponse = await axios.post('https://xrplcluster.com/', {
-                        method: "account_nfts",
-                        params: [{ account: accountAddress, ledger_index: "validated" }]
-                    }, {
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-
-                    if (xrplResponse.data && xrplResponse.data.result && xrplResponse.data.result.account_nfts) {
-                        totalNftsFound = xrplResponse.data.result.account_nfts.length;
-                    }
-                } catch (rpcErr) {
-                    console.error("RPC Lookup failed, fallback processing active:", rpcErr.message);
-                }
-            }
-
+            // Structure the response so your Unity 'XamanStatusResponse' class can read it cleanly
             return res.status(200).json({
-                resolved: status.meta.resolved,
-                rejected: status.meta.rejected,
-                expired: status.meta.expired,
-                openedInApp: status.meta.opened,
-                account: accountAddress,
-                nftCount: totalNftsFound,
-                hasEnoughNfts: totalNftsFound >= 3
+                resolved: payloadStatus?.meta?.resolved || false,
+                rejected: payloadStatus?.meta?.signed === false && payloadStatus?.meta?.resolved === true,
+                expired: payloadStatus?.meta?.expired || false,
+                openedInApp: payloadStatus?.meta?.opened || false,
+                account: payloadStatus?.response?.account || "",
+                nftCount: 0, // Handled inside your Unity client code via XrplNftCounter
+                debugCount: 0
             });
-        } catch (err) {
-            return res.status(500).json({ error: err.message });
+        } catch (error) {
+            console.error("Xaman Polling Error:", error);
+            return res.status(500).json({ error: "Failed to fetch payload status", details: error.message });
         }
     }
 
-    return res.status(405).json({ error: "Method implementation protocol mismatch error." });
+    // Fallback for unsupported HTTP methods
+    return res.status(405).json({ error: "Method Not Allowed" });
 };
