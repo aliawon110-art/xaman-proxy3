@@ -14,8 +14,8 @@ module.exports = async (req, res) => {
     // ==========================================
     // EMERGENCY DIRECT KEY INJECTION (BYPASSES VERCEL ENV VARS)
     // ==========================================
-    const apiKey = "YOUR_XAMAN_API_KEY_HERE"; 
-    const apiSecret = "YOUR_XAMAN_API_SECRET_HERE"; 
+    const apiKey = "403506c7-97d3-4922-b45a-80a543decec1"; 
+    const apiSecret = "5dfb5f42-5606-4fb3-b773-859a834c4d12"; 
     // ==========================================
 
     // Initialize the Xaman SDK directly
