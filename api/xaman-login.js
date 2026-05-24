@@ -11,20 +11,14 @@ module.exports = async (req, res) => {
         return res.status(200).end();
     }
 
-    // 2. Retrieve environment variables
-    const apiKey = process.env.XUMM_API_KEY || process.env.XUMM_APIKEY;
-    const apiSecret = process.env.XUMM_API_SECRET || process.env.XUMM_APISECRET;
+    // ==========================================
+    // EMERGENCY DIRECT KEY INJECTION (BYPASSES VERCEL ENV VARS)
+    // ==========================================
+    const apiKey = "YOUR_XAMAN_API_KEY_HERE"; 
+    const apiSecret = "YOUR_XAMAN_API_SECRET_HERE"; 
+    // ==========================================
 
-    // Direct fallback check if keys are completely missing
-    if (!apiKey || !apiSecret) {
-        console.error("CRITICAL ERROR: Xaman API Keys are missing in Vercel Environment Variables!");
-        return res.status(500).json({ 
-            error: "Backend configuration error: Missing API Keys.",
-            suggestion: "Please add XUMM_API_KEY and XUMM_API_SECRET to your Vercel project environment variables."
-        });
-    }
-
-    // Initialize the Xaman SDK safely inside the execution context
+    // Initialize the Xaman SDK directly
     let sdk;
     try {
         sdk = new XummSdk(apiKey, apiSecret);
@@ -61,7 +55,7 @@ module.exports = async (req, res) => {
                     try {
                         parsedBody = JSON.parse(req.body);
                     } catch (parseError) {
-                        console.warn("Body was a string but failed standard JSON parsing, evaluating fallback.");
+                        console.warn("Body was a string but failed standard JSON parsing.");
                     }
                 }
                 
