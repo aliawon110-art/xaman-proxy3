@@ -12,7 +12,7 @@ module.exports = async (req, res) => {
     }
 
     // ==========================================
-    // EMERGENCY DIRECT KEY INJECTION (BYPASSES VERCEL ENV VARS)
+    // FIXED DIRECT KEY INJECTION
     // ==========================================
     const apiKey = "403506c7-97d3-4922-b45a-80a543decec1"; 
     const apiSecret = "5dfb5f42-5606-4fb3-b773-859a834c4d12"; 
@@ -27,17 +27,39 @@ module.exports = async (req, res) => {
         return res.status(500).json({ error: "SDK Initialization Failure", details: sdkError.message });
     }
 
-    // 3. Route Intercept: Close window handler for mobile deep-linking setups
+    // 3. STRICT INTERCEPT ROUTE: Aggressively closes window and switches back to Unity app
     if (req.query.action === 'close') {
         res.setHeader('Content-Type', 'text/html');
         return res.status(200).send(`
             <!DOCTYPE html>
             <html>
-            <head><title>Authorized</title></head>
-            <body style="font-family:sans-serif; text-align:center; padding-top:50px;">
-                <h2>Authorization Approved!</h2>
-                <p>You can close this window and safely return to your game.</p>
-                <script>window.close();</script>
+            <head>
+                <title>Redirecting to Game</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body { font-family: sans-serif; text-align: center; padding-top: 60px; background-color: #000000; color: #ffffff; }
+                    .spinner { border: 4px solid rgba(255,255,255,0.1); width: 36px; height: 36px; border-radius: 50%; border-left-color: #2196F3; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+                    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                </style>
+            </head>
+            <body>
+                <div class="spinner"></div>
+                <h2>Authorization Successful!</h2>
+                <p>Returning to your game window...</p>
+                
+                <script>
+                    function enforceStrictReturn() {
+                        // 1. Force the mobile system OS to wake up and focus your Unity App via custom protocol
+                        window.location.replace("mygame://close");
+                        
+                        // 2. Strict desktop browser self-destruct sequence 
+                        setTimeout(function() {
+                            window.open('', '_self', ''); 
+                            window.close();
+                        }, 300);
+                    }
+                    window.onload = enforceStrictReturn;
+                </script>
             </body>
             </html>
         `);
@@ -46,7 +68,16 @@ module.exports = async (req, res) => {
     // 4. POST Pathway: Unity is creating a new login QR Code / Payload
     if (req.method === 'POST') {
         try {
-            let payloadData = { TransactionType: 'SignIn' };
+            // Force Xaman to intercept the completion flow and hit our strict redirect routing handler
+            let payloadData = { 
+                TransactionType: 'SignIn',
+                options: {
+                    return_url: {
+                        app: `https://xaman-proxy3.vercel.app/api/xaman-login?action=close`,
+                        web: `https://xaman-proxy3.vercel.app/api/xaman-login?action=close`
+                    }
+                }
+            };
             
             // Safe Body Parsing: Handles raw strings from UnityWebRequest as well as auto-parsed objects
             if (req.body) {
@@ -59,11 +90,10 @@ module.exports = async (req, res) => {
                     }
                 }
                 
-                // If Unity sent standard JSON wrapping 'txjson'
+                // Merge inbound elements if Unity sent custom payload objects inside 'txjson'
                 if (parsedBody && parsedBody.txjson) {
                     payloadData = { ...payloadData, ...parsedBody.txjson };
                 } else if (parsedBody && typeof parsedBody === 'object') {
-                    // Fallback: If Unity sent raw transaction values directly at the root level
                     payloadData = { ...payloadData, ...parsedBody };
                 }
             }
@@ -106,6 +136,5 @@ module.exports = async (req, res) => {
         }
     }
 
-    // Fallback if someone attempts a PUT, DELETE, etc.
     return res.status(405).json({ error: "Method Not Allowed" });
 };
