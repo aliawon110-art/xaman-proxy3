@@ -1,146 +1,126 @@
-const xrpl = require("xrpl");
-const { XummSdk } = require("xumm-sdk");
+const { XummSdk } = require('xumm-sdk');
 
-const apiKey = process.env.XAMAN_API_KEY;
-const apiSecret = process.env.XAMAN_API_SECRET;
+// Initialize Xumm SDK using your private credentials
+const sdk = new XummSdk(process.env.XUMM_API_KEY, process.env.XUMM_API_SECRET);
 
-let sdk = null;
-if (apiKey && apiSecret) {
-    sdk = new XummSdk(apiKey, apiSecret);
-} else {
-    console.error("[XAMAN REJECTION] Environment keys are missing from the configuration console.");
-}
+module.exports = async (req, res) => {
+    // Enable CORS handling for cross-origin browser execution loops
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-// ---------------- NFT CHECK ----------------
-async function checkNFTs(walletAddress) {
-    const client = new xrpl.Client("wss://xrplcluster.com");
-    await client.connect();
-
-    try {
-        const res = await client.request({
-            command: "account_nfts",
-            account: walletAddress,
-        });
-
-        const nfts = res.result.account_nfts || [];
-        console.log("WALLET:", walletAddress, "COUNT:", nfts.length);
-
-        return {
-            debugCount: nfts.length,
-           hasEnoughNfts: nfts.length >= 3  // Only allow 3 or more!
-        };
-    } catch (err) {
-        console.error("NFT EXCEPTION:", err);
-        return { debugCount: 0, hasEnoughNfts: false };
-    } finally {
-        try { await client.disconnect(); } catch (e) {}
-    }
-}
-
-// ---------------- MAIN HANDLER ----------------
-module.exports = async function handler(req, res) {
-    // Force clean CORS properties for external WebGL access
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-    if (req.method === "OPTIONS") {
+    if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
 
-    res.setHeader("Cache-Control", "no-store");
+    // INTERCEPT ROUTE: If the callback action tells the browser to close the window
+    if (req.query.action === 'close') {
+        res.setHeader('Content-Type', 'text/html');
+        return res.status(200).send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Success</title>
+                <style>
+                    body { background-color: #121212; color: #ffffff; font-family: sans-serif; text-align: center; padding-top: 100px; }
+                    .card { background: #1e1e1e; padding: 40px; display: inline-block; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+                    h1 { color: #00e676; margin-bottom: 10px; }
+                    p { color: #aaaaaa; font-size: 16px; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h1>✓ Signed Successfully!</h1>
+                    <p>Returning to your game screen automatically...</p>
+                </div>
+                <script>
+                    // Execute tab shutdown protocols
+                    setTimeout(function() {
+                        window.close();
+                        // Alternative routing path safety mechanism if native browser settings inhibit window close blocks
+                        setTimeout(function() {
+                            window.location.href = "about:blank";
+                        }, 200);
+                    }, 500);
+                </script>
+            </body>
+            </html>
+        `);
+    }
 
-    try {
-        if (!sdk) {
-            throw new Error("Application API keys are missing or unconfigured inside the environment panel.");
-        }
-
-        // ---------------- CREATE SIGN IN PAYLOAD (POST) ----------------
-        if (req.method === "POST") {
-            console.log("[XAMAN PIPELINE] Triggering payload generation request...");
-
-            // Run a rapid diagnostics check to verify API credentials
-            try {
-                const pingTest = await sdk.ping();
-                console.log("[XAMAN DIAGNOSTICS] App Name linked to credentials:", pingTest.application.name);
-            } catch (pingErr) {
-                console.error("[XAMAN DIAGNOSTICS FAILURE] API Key pair rejected by Xaman platform:", pingErr.message);
-                throw new Error("Invalid Developer App API keys. Check credentials inside the Xaman Developer Console.");
-            }
-
-            // Create payload utilizing proper transaction structures
-            // Passing true as the second parameter forces the SDK to yield specific network errors
+    // PROCESS TIMELINE 1: Handle incoming POST requests to establish fresh validation signatures
+    if (req.method === 'POST') {
+        try {
             const payload = await sdk.payload.create({
                 txjson: {
                     TransactionType: "SignIn"
                 },
                 options: {
-                    submit: false // Ensures transaction is strictly used for authentication scoping
+                    submit: false,
+                    // FORCE REDIRECT: Returns the user back to our secure tab closing listener route
+                    return_url: {
+                        web: "https://xaman-proxy3.vercel.app/api/xaman-login?action=close"
+                    }
                 }
             }, true);
 
-            console.log("[XAMAN API RESPONSE]:", JSON.stringify(payload));
-
-            if (!payload || !payload.uuid) {
-                const apiErrorReason = (payload && payload.error) ? ` Platform Error: ${payload.error.message}` : "";
-                throw new Error(`Xaman endpoint failed to generate an identity tracking reference.${apiErrorReason}`);
-            }
-
             return res.status(200).json({
                 uuid: payload.uuid,
-                next: payload.next,
-                error: null
+                next: { always: payload.next.always },
+                refs: { qr_png: payload.refs.qr_png }
             });
+        } catch (err) {
+            return res.status(500).json({ error: err.message });
+        }
+    }
+
+    // PROCESS TIMELINE 2: Handle incoming GET requests tracking user authorization state loops
+    if (req.method === 'GET') {
+        const { uuid } = req.query;
+        if (!uuid) {
+            return res.status(400).json({ error: "Missing required payload uuid parameter context." });
         }
 
-        // ---------------- CHECK AUTHENTICATION STATUS (GET) ----------------
-        if (req.method === "GET") {
-            const uuid = req.query.uuid;
-            if (!uuid) {
-                return res.status(400).json({ resolved: false, error: "Missing identity sequence tracking parameter." });
-            }
+        try {
+            const status = await sdk.payload.get(uuid);
+            
+            let accountAddress = status.response?.account || null;
+            let totalNftsFound = 0;
 
-            const result = await sdk.payload.get(uuid);
-            if (!result || !result.meta) {
-                throw new Error("Target identity sequence verification timed out on platform server.");
+            // Fetch live data directly when authorization state updates successfully
+            if (status.meta.resolved && accountAddress) {
+                try {
+                    // Pull verified ledger entries from public RPC networks
+                    const xrplResponse = await fetch('https://xrplcluster.com/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            method: "account_nfts",
+                            params: [{ account: accountAddress, ledger_index: "validated" }]
+                        })
+                    });
+                    const xrplData = await xrplResponse.json();
+                    if (xrplData.result && xrplData.result.account_nfts) {
+                        totalNftsFound = xrplData.result.account_nfts.length;
+                    }
+                } catch (rpcErr) {
+                    console.error("RPC Lookup failed, fallback processing active:", rpcErr);
+                }
             }
-
-            if (!result.meta.resolved) {
-                return res.status(200).json({ resolved: false, error: null });
-            }
-
-            if (!result.meta.signed) {
-                return res.status(200).json({
-                    resolved: true,
-                    hasEnoughNfts: false,
-                    debugCount: 0,
-                    error: "Authentication signature rejected by remote wallet user."
-                });
-            }
-
-            const wallet = result.response.account;
-            const nft = await checkNFTs(wallet);
 
             return res.status(200).json({
-                resolved: true,
-                account: wallet,
-                debugCount: nft.debugCount,
-                hasEnoughNfts: nft.hasEnoughNfts,
-                error: null
+                resolved: status.meta.resolved,
+                rejected: status.meta.rejected,
+                expired: status.meta.expired,
+                openedInApp: status.meta.opened,
+                account: accountAddress,
+                nftCount: totalNftsFound,
+                hasEnoughNfts: totalNftsFound >= 3
             });
+        } catch (err) {
+            return res.status(500).json({ error: err.message });
         }
-
-        return res.status(405).json({ error: "Method implementation pattern rejected." });
-
-    } catch (e) {
-        console.error("[CRITICAL BACKEND EXCEPTION]:", e.message);
-        
-        // Use an HTTP 200 payload wrapper to carry backend exception data safely to Unity
-        return res.status(200).json({
-            uuid: null,
-            next: null,
-            resolved: false,
-            error: e.message || "An unhandled server execution fallback occurred."
-        });
     }
+
+    return res.status(405).json({ error: "Method implementation protocol mismatch error." });
 };
