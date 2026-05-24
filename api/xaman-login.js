@@ -9,6 +9,7 @@ module.exports = async (req, res) => {
         return res.status(200).end();
     }
 
+    // Explicitly using your active credentials to clear the 502 Bad Gateway crash
     const apiKey = "403506c7-97d3-4922-b45a-80a543decec1"; 
     const apiSecret = "5dfb5f42-5606-4fb3-b773-859a834c4d12"; 
 
@@ -19,7 +20,7 @@ module.exports = async (req, res) => {
         return res.status(500).json({ error: "SDK Initialization Failure", details: sdkError.message });
     }
 
-    // WEBGL STRICT POPUP RESCUE LOOP
+    // WEBGL STRICT POPUP HANDSHAKE
     if (req.query.action === 'close') {
         res.setHeader('Content-Type', 'text/html');
         return res.status(200).send(`
@@ -35,13 +36,10 @@ module.exports = async (req, res) => {
             <body>
                 <h2>Authorization Approved!</h2>
                 <p>Returning control to your game window...</p>
-                
                 <script>
-                    // Talk directly to the original game window hiding behind this tab
                     if (window.opener) {
                         window.opener.postMessage("XAMAN_LOGIN_SUCCESS", "*");
                     }
-                    // Drop dead instantly
                     setTimeout(function() { window.close(); }, 200);
                 </script>
             </body>
