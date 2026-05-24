@@ -1,6 +1,7 @@
 const { XummSdk } = require('xumm-sdk');
+const axios = require('axios'); // ADD THIS Stable HTTP module
 
-// Initialize Xumm SDK using your private credentials
+// Initialize Xaman SDK using your credentials
 const sdk = new XummSdk(process.env.XUMM_API_KEY, process.env.XUMM_API_SECRET);
 
 module.exports = async (req, res) => {
@@ -37,7 +38,7 @@ module.exports = async (req, res) => {
                     // Execute tab shutdown protocols
                     setTimeout(function() {
                         window.close();
-                        // Alternative routing path safety mechanism if native browser settings inhibit window close blocks
+                        // Alternative path safety mechanism if native browser settings inhibit window close blocks
                         setTimeout(function() {
                             window.location.href = "about:blank";
                         }, 200);
@@ -90,21 +91,19 @@ module.exports = async (req, res) => {
             // Fetch live data directly when authorization state updates successfully
             if (status.meta.resolved && accountAddress) {
                 try {
-                    // Pull verified ledger entries from public RPC networks
-                    const xrplResponse = await fetch('https://xrplcluster.com/', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            method: "account_nfts",
-                            params: [{ account: accountAddress, ledger_index: "validated" }]
-                        })
+                    // Pull verified ledger entries using stable axios instead of native fetch
+                    const xrplResponse = await axios.post('https://xrplcluster.com/', {
+                        method: "account_nfts",
+                        params: [{ account: accountAddress, ledger_index: "validated" }]
+                    }, {
+                        headers: { 'Content-Type': 'application/json' }
                     });
-                    const xrplData = await xrplResponse.json();
-                    if (xrplData.result && xrplData.result.account_nfts) {
-                        totalNftsFound = xrplData.result.account_nfts.length;
+
+                    if (xrplResponse.data && xrplResponse.data.result && xrplResponse.data.result.account_nfts) {
+                        totalNftsFound = xrplResponse.data.result.account_nfts.length;
                     }
                 } catch (rpcErr) {
-                    console.error("RPC Lookup failed, fallback processing active:", rpcErr);
+                    console.error("RPC Lookup failed, fallback processing active:", rpcErr.message);
                 }
             }
 
