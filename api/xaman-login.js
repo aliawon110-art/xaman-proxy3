@@ -27,7 +27,7 @@ async function checkNFTs(walletAddress) {
 
         return {
             debugCount: nfts.length,
-            hasEnoughNfts: nfts.length >= 2
+           hasEnoughNfts: nfts.length >= 3  // Only allow 3 or more!
         };
     } catch (err) {
         console.error("NFT EXCEPTION:", err);
